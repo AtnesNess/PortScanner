@@ -1,8 +1,15 @@
 from socket import *
 import re
 from struct import *
+from threading import Thread
+import argparse
+global tcp_ports
+global udp_ports
+global closed_udp_ports
 
-
+tcp_ports = []
+udp_ports = {}
+closed_udp_ports = []
 NTP_TEMPLATE = (36, 2, 0, 238, 3602, 2077,
             b'\xc1\xbe\xe6A', 0, 0, 0, 2208998900)
 
@@ -10,6 +17,9 @@ NTP_HEADER_FORMAT = ">BBBBII4sQQQQ"
 
 DNS_TEMPLATE = (34097, 256, 1, 0, 0, 0, b"www.google.com", 1, 1)
 DNS_HEADER_FORMAT = "HHHHHHsHH"
+IPv4_HEADER_FORMAT = "BBHHHBBHii"
+ICMP_HEADER_FORMAT = "BBHi"
+DGRAM_HEADER_FORMAT = "HHHH"
 
 
 def isIP(adr):
@@ -37,14 +47,10 @@ def scan_tcp(host, port):
         except ConnectionResetError:
             print("connection reset")
         except timeout:
-            print("timeout")
-        if data:
-            print("Reply:{}".format(data))
-        else:
-            print("Reply: ----(No Data)")
-        print("         ")
-
+            pass
+        tcp_ports.append(port)
         sock.close()
+
         return True
     else:
         return False
@@ -62,57 +68,129 @@ def scan_udp(host, port):
             if proto == "DNS":
                 request = pack(DNS_HEADER_FORMAT, *DNS_TEMPLATE)
             try:
+
+                connection = socket(proto=IPPROTO_ICMP, type=SOCK_RAW)
+                connection.settimeout(0.5)
+
                 sock.settimeout(0.1)
                 sock.sendto(request, (host, port))
-                data = sock.recv(2048)
+                try:
+                    data = sock.recv(2048)
+                    if data:
+                        if port in udp_ports:
+                            if proto not in udp_ports[port]:
 
-                if data:
-                    res_proto.append(proto)
-                    print(port, data, proto)
+                                udp_ports[port].append(proto)
+                        else:
+                            udp_ports[port] = [proto]
+                    return
+
+                except timeout:
+                    pass
+                try:
+                    data_icmp = connection.recvfrom(512)
+                    icmp_port = unpack("H"*32, data_icmp[0][1:65])[-7]
+                    closed_udp_ports.append(icmp_port)
+                except timeout:
+                    if port in udp_ports:
+                        if proto+"|filtered" not in udp_ports[port]:
+                            udp_ports[port].append(proto+"|filtered")
+                    else:
+                        udp_ports[port] = [proto+"|filtered"]
+                    return True
+                except Exception as e:
+                    print(e)
+                    pass
+                connection.close()
             except timeout:
                 pass
-            except TypeError:
+            except TypeError as e:
                 pass
     except Exception as e:
-            print(e)
             pass
     finally:
         sock.close()
-        if res_proto:
-            return res_proto
 
-
-def main():
+def main(args):
     host = "127.0.1.1"
     ports = []
-    for i in range(40, 60):
+    start = 1
+    end = 300
+    if args.range:
+        start = int(args.range[0])
+        end = int(args.range[1])
+
+    for i in range(start, end):
 
         ports.append(i)
     if isIP(host):
         ip = host
     else:
         ip = gethostbyname(host)
-    tcp_ports = []
-    udp_ports = {}
+    udp_threads = []
+    tcp_threads = []
     if ip:
         print("Running scan on {}".format(host))
         print("Target IP: {}".format(ip))
-        for port in ports:
-            if scan_tcp(host, int(port)):
-                tcp_ports.append(port)
-        for port in tcp_ports:
+        if args.tcp:
+            for port in ports:
+                tcp_threads.append(Thread(target=scan_tcp, args=(host, int(port))))
+                try:
+                    tcp_threads[-1].start()
+                except RuntimeError:
 
-            proto = scan_udp(host, int(port))
-            if proto is not None:
-                udp_ports[port] = proto
+                    for thread in tcp_threads:
+                        if thread.isAlive():
+                            thread.join()
+                            tcp_threads.pop(0)
+                    tcp_threads.append(Thread(target=scan_tcp, args=(host, int(port))))
+                    tcp_threads[-1].start()
+            tcp_threads[-1].join()
+
+        if args.udp:
+            for port in ports:
+                udp_threads.append(Thread(target=scan_udp, args=(host, int(port))))
+                try:
+                    udp_threads[-1].start()
+                except RuntimeError:
+                    for thread in udp_threads:
+                        if thread.isAlive():
+                            thread.join()
+                            udp_threads.pop(0)
+
+                    udp_threads.append(Thread(target=scan_udp, args=(host, int(port))))
+                    udp_threads[-1].start()
+            udp_threads[-1].join()
 
     else:
         print("ERROR: Invalid host")
+
+    if not args.cancel and args.udp:
+        print("Checking expected udp ports (-c flag to cancel this procedure)")
+        for port in ports:
+            if not port in closed_udp_ports:
+                if scan_udp(host, port):
+                    print("{}: opened".format(port))
+                else:
+                    print("{}: closed".format(port))
+
     print("--------")
-    print("TCP PORTS: ", tcp_ports)
-    print("UDP PORTS: ", udp_ports)
+    if args.tcp:
+        print("TCP PORTS: ", tcp_ports)
+    if args.udp:
+        print("UDP PORTS: ", udp_ports)
 
 
 if __name__ == "__main__":
-        main()
+    parser = argparse.ArgumentParser(description="TCP/UDP scanner")
+    parser.add_argument("-r", "--range", metavar=("FROM", "TO"),  nargs=2,  help='range of tcp ports')
+    parser.add_argument("-u", "--udp", action="store_true",
+                        help="scan udp ports")
+    parser.add_argument("-t", "--tcp", action="store_true",
+                        help="scan tcp ports")
+    parser.add_argument("-c", "--cancel", action="store_true",
+                        help="cancel checking expected udp ports")
+    args = parser.parse_args()
+
+    main(args)
 
