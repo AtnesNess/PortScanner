@@ -1,5 +1,6 @@
 from socket import *
 import re
+from ipaddress import *
 from struct import *
 from threading import Thread
 import argparse
@@ -113,6 +114,7 @@ def scan_udp(host, port):
 
 def main(args):
     host = "127.0.1.1"
+
     ports = []
     start = 1
     end = 300
@@ -183,6 +185,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="TCP/UDP scanner")
+    parser.add_argument("host",  help='host to scan')
     parser.add_argument("-r", "--range", metavar=("FROM", "TO"),  nargs=2,  help='range of tcp ports')
     parser.add_argument("-u", "--udp", action="store_true",
                         help="scan udp ports")
