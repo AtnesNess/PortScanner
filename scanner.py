@@ -112,9 +112,11 @@ def scan_udp(host, port):
     finally:
         sock.close()
 
+
 def main(args):
     host = "127.0.1.1"
-
+    if args.host:
+        host = str(args.host)
     ports = []
     start = 1
     end = 300
