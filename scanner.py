@@ -40,13 +40,12 @@ def scan_tcp(host, port):
     except timeout:
         return False
     if sock:
-        print("Connected to {}:{}".format(host, port))
         sock.send(b"ALOHA")
         data = None
         try:
             data = sock.recv(2048)
         except ConnectionResetError:
-            print("connection reset")
+            pass
         except timeout:
             pass
         tcp_ports.append(port)
@@ -107,6 +106,7 @@ def scan_udp(host, port):
                 pass
             except TypeError as e:
                 pass
+
     except Exception as e:
             pass
     finally:
@@ -137,31 +137,24 @@ def main(args):
         if args.tcp:
             for port in ports:
                 tcp_threads.append(Thread(target=scan_tcp, args=(host, int(port))))
-                try:
-                    tcp_threads[-1].start()
-                except RuntimeError:
-
+                tcp_threads[-1].start()
+                if len(tcp_threads) > 100:
                     for thread in tcp_threads:
                         if thread.isAlive():
                             thread.join()
-                            tcp_threads.pop(0)
-                    tcp_threads.append(Thread(target=scan_tcp, args=(host, int(port))))
-                    tcp_threads[-1].start()
+                        tcp_threads.pop(0)
             tcp_threads[-1].join()
 
         if args.udp:
             for port in ports:
                 udp_threads.append(Thread(target=scan_udp, args=(host, int(port))))
-                try:
-                    udp_threads[-1].start()
-                except RuntimeError:
+                udp_threads[-1].start()
+                if len(udp_threads) > 100:
                     for thread in udp_threads:
                         if thread.isAlive():
                             thread.join()
-                            udp_threads.pop(0)
+                        udp_threads.pop(0)
 
-                    udp_threads.append(Thread(target=scan_udp, args=(host, int(port))))
-                    udp_threads[-1].start()
             udp_threads[-1].join()
 
     else:
@@ -173,8 +166,6 @@ def main(args):
             if not port in closed_udp_ports:
                 if scan_udp(host, port):
                     print("{}: opened".format(port))
-                else:
-                    print("{}: closed".format(port))
 
     print("--------")
     if args.tcp:
