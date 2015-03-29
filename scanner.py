@@ -17,10 +17,15 @@ NTP_TEMPLATE = (36, 2, 0, 238, 3602, 2077,
 NTP_HEADER_FORMAT = ">BBBBII4sQQQQ"
 
 DNS_TEMPLATE = (34097, 256, 1, 0, 0, 0, b"www.google.com", 1, 1)
+SMTP_TEMPLATE = (55066, 25, 1, 20, 127, 24, 114, 16, 40882, 0, 0, 1,
+                 1, 8, 10, 0, 25, 127, 111, 127, 118, 65, 0, b"EHLO", 20, b"atnes-K53SM")
 DNS_HEADER_FORMAT = "HHHHHHsHH"
 IPv4_HEADER_FORMAT = "BBHHHBBHii"
 ICMP_HEADER_FORMAT = "BBHi"
 DGRAM_HEADER_FORMAT = "HHHH"
+TCP_HEADER_FORMAT = "HHiibbbbHbbbbbbbbbbbbbb"
+SMTP_HEADER_FORMAT = TCP_HEADER_FORMAT+"sbs"
+
 
 
 def isIP(adr):
@@ -58,32 +63,33 @@ def scan_tcp(host, port):
 
 def scan_udp(host, port):
     sock = socket(AF_INET, SOCK_DGRAM)
-    res_proto = []
     try:
-        for proto in ["NTP", "DNS"]: # "SMTP", "POP3", "HTTP"]:
+        for proto in [ "NTP", "DNS", "SMTP"]:# "POP3", "HTTP"]:
             request = None
             data = None
             if proto == "NTP":
                 request = pack(NTP_HEADER_FORMAT, *NTP_TEMPLATE)
             if proto == "DNS":
                 request = pack(DNS_HEADER_FORMAT, *DNS_TEMPLATE)
+            if proto == "SMTP":
+                request = pack(SMTP_HEADER_FORMAT, *SMTP_TEMPLATE)
             try:
 
                 connection = socket(proto=IPPROTO_ICMP, type=SOCK_RAW)
-                connection.settimeout(0.5)
 
-                sock.settimeout(0.1)
+                connection.settimeout(0.001)
+
+                sock.settimeout(0.001)
                 sock.sendto(request, (host, port))
                 try:
                     data = sock.recv(2048)
                     if data:
                         if port in udp_ports:
                             if proto not in udp_ports[port]:
-
                                 udp_ports[port].append(proto)
                         else:
                             udp_ports[port] = [proto]
-                    return
+
 
                 except timeout:
                     pass
@@ -94,7 +100,8 @@ def scan_udp(host, port):
                 except timeout:
                     if port in udp_ports:
                         if proto+"|filtered" not in udp_ports[port]:
-                            udp_ports[port].append(proto+"|filtered")
+                            if proto not in udp_ports[port]:
+                                udp_ports[port].append(proto+"|filtered")
                     else:
                         udp_ports[port] = [proto+"|filtered"]
                     return True
@@ -103,14 +110,32 @@ def scan_udp(host, port):
                     pass
                 connection.close()
             except timeout:
+                print("sdas")
                 pass
             except TypeError as e:
+                print(e)
                 pass
 
     except Exception as e:
-            pass
+        print(e)
+        pass
     finally:
         sock.close()
+
+
+def scan(func, ports, host):
+    threads = []
+    for port in ports:
+        threads.append(Thread(target=func, args=(host, int(port))))
+        threads[-1].start()
+        if len(threads) > 256:
+            for thread in threads:
+                if thread.isAlive():
+                    thread.join()
+                threads.pop(0)
+    for thread in threads:
+        if thread.isAlive():
+            thread.join()
 
 
 def main(args):
@@ -137,27 +162,10 @@ def main(args):
         print("Running scan on {}".format(host))
         print("Target IP: {}".format(ip))
         if args.tcp:
-            for port in ports:
-                tcp_threads.append(Thread(target=scan_tcp, args=(host, int(port))))
-                tcp_threads[-1].start()
-                if len(tcp_threads) > 100:
-                    for thread in tcp_threads:
-                        if thread.isAlive():
-                            thread.join()
-                        tcp_threads.pop(0)
-            tcp_threads[-1].join()
+            scan(scan_tcp, ports, host)
 
         if args.udp:
-            for port in ports:
-                udp_threads.append(Thread(target=scan_udp, args=(host, int(port))))
-                udp_threads[-1].start()
-                if len(udp_threads) > 100:
-                    for thread in udp_threads:
-                        if thread.isAlive():
-                            thread.join()
-                        udp_threads.pop(0)
-
-            udp_threads[-1].join()
+            scan(scan_udp, ports, host)
 
     else:
         print("ERROR: Invalid host")
