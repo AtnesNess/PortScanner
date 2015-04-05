@@ -42,7 +42,7 @@ def scan_tcp(host, port):
         sock.settimeout(0.2)
         sock.connect((host, port))
         data = sock.recv(2048)
-        print(data, "ch")
+
         if sock:
             request = b"aloha"
             for proto in ["SMTP", "HTTP", "DNS"]:
@@ -53,11 +53,11 @@ def scan_tcp(host, port):
                 if proto == "DNS":
                     request = pack(DNS_HEADER_FORMAT, *DNS_TEMPLATE)
                 try:
-                    print(request)
+
                     sock.send(request)
 
                     data = sock.recv(2048)
-                    print(data, proto, port)
+                   
                     if proto == "SMTP" and (data[:3] == b'220' or data[:3] == b'250'):
                         tcp_ports[port] = proto
                     if proto == "HTTP" and data == b"":
